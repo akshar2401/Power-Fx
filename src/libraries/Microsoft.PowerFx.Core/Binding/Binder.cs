@@ -1983,8 +1983,8 @@ namespace Microsoft.PowerFx.Core.Binding
 
                 // Accumulate the current type.
                 accumulatedType = DType.Union(
-                    accumulatedType,
-                    currentRecordType,
+                    accumulatedType, 
+                    currentRecordType, 
                     useLegacyDateTimeAccepts: false,
                     usePowerFxV1CompatibilityRules: Features.PowerFxV1CompatibilityRules);
             }
@@ -2039,7 +2039,7 @@ namespace Microsoft.PowerFx.Core.Binding
                     }
 
                     fields = DType.Union(
-                        fields,
+                        fields, 
                         DType.EmptyRecord.Add(ref fError, DPath.Root, name.Name, lambdaParamType),
                         useLegacyDateTimeAccepts: false,
                         usePowerFxV1CompatibilityRules: Features.PowerFxV1CompatibilityRules);
@@ -3262,7 +3262,7 @@ namespace Microsoft.PowerFx.Core.Binding
                         SetDottedNameError(node, TexlStrings.ErrInvalidIdentifier);
                         return;
                     }
-
+                    
                     // Validate that the name exists in the enum type
                     if (leftType.TryGetEnumValue(nameRhs, out value))
                     {
