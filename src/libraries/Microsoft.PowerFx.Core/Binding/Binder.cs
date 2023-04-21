@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation.
+// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
 using System;
@@ -1984,7 +1984,7 @@ namespace Microsoft.PowerFx.Core.Binding
                             if (firstArg == node && !scopeFunction.ScopeInfo.UsesAllFieldsInScope)
                             {
                                 // The cursor type must be the same as the current type.
-                                Contracts.Assert(currentRecordType.Accepts(callInfo.CursorType));
+                                Contracts.Assert(currentRecordType.Accepts(callInfo.CursorType, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: Features.PowerFxV1CompatibilityRules));
                                 currentRecordType = GetUsedScopeFields(callInfo);
                             }
                         }
@@ -1995,7 +1995,11 @@ namespace Microsoft.PowerFx.Core.Binding
                 }
 
                 // Accumulate the current type.
-                accumulatedType = DType.Union(accumulatedType, currentRecordType);
+                accumulatedType = DType.Union(
+                    accumulatedType,
+                    currentRecordType,
+                    useLegacyDateTimeAccepts: false,
+                    usePowerFxV1CompatibilityRules: Features.PowerFxV1CompatibilityRules);
             }
 
             return accumulatedType;
@@ -2047,7 +2051,11 @@ namespace Microsoft.PowerFx.Core.Binding
                         lambdaParamType = accParamType;
                     }
 
-                    fields = DType.Union(fields, DType.EmptyRecord.Add(ref fError, DPath.Root, name.Name, lambdaParamType));
+                    fields = DType.Union(
+                        fields,
+                        DType.EmptyRecord.Add(ref fError, DPath.Root, name.Name, lambdaParamType),
+                        useLegacyDateTimeAccepts: false,
+                        usePowerFxV1CompatibilityRules: Features.PowerFxV1CompatibilityRules);
                 }
             }
 
@@ -3711,7 +3719,7 @@ namespace Microsoft.PowerFx.Core.Binding
 
                 var childType = _txb.GetType(node.Child);
 
-                var res = CheckUnaryOpCore(_txb.ErrorContainer, node, childType, _txb.BindingConfig.NumberIsFloat);
+                var res = CheckUnaryOpCore(_txb.ErrorContainer, node, _features.PowerFxV1CompatibilityRules, childType, _txb.BindingConfig.NumberIsFloat);
 
                 foreach (var coercion in res.Coercions)
                 {
@@ -3737,7 +3745,7 @@ namespace Microsoft.PowerFx.Core.Binding
                 var leftType = _txb.GetType(node.Left);
                 var rightType = _txb.GetType(node.Right);
 
-                var res = CheckBinaryOpCore(_txb.ErrorContainer, node, leftType, rightType, _txb.Document != null && _txb.Document.Properties.EnabledFeatures.IsEnhancedDelegationEnabled, _txb.BindingConfig.NumberIsFloat);
+                var res = CheckBinaryOpCore(_txb.ErrorContainer, node, _txb.Features.PowerFxV1CompatibilityRules, leftType, rightType, _txb.Document != null && _txb.Document.Properties.EnabledFeatures.IsEnhancedDelegationEnabled, _txb.BindingConfig.NumberIsFloat);
 
                 foreach (var coercion in res.Coercions)
                 {
@@ -4261,7 +4269,7 @@ namespace Microsoft.PowerFx.Core.Binding
                             // Determine the Scope Identifier using the 1st arg
                             required = _txb.GetScopeIdent(nodeInp, _txb.GetType(nodeInp), out scopeIdentifier);
 
-                            if (scopeInfo.CheckInput(nodeInp, _txb.GetType(nodeInp), out scope))
+                            if (scopeInfo.CheckInput(_txb.Features, nodeInp, _txb.GetType(nodeInp), out scope))
                             {
                                 if (_txb.TryGetEntityInfo(nodeInp, out expandInfo))
                                 {
@@ -4352,7 +4360,7 @@ namespace Microsoft.PowerFx.Core.Binding
                 }
                 else
                 {
-                    fArgsValid = scopeInfo.CheckInput(nodeInput, typeInput, out typeScope);
+                    fArgsValid = scopeInfo.CheckInput(_txb.Features, nodeInput, typeInput, out typeScope);
 
                     // Determine the scope identifier using the first node for lambda params
                     identRequired = _txb.GetScopeIdent(nodeInput, typeScope, out scopeIdent);
@@ -5063,7 +5071,7 @@ namespace Microsoft.PowerFx.Core.Binding
                     return;
                 }
 
-                var someFunc = FindBestErrorOverload(overloads, argTypes, carg);
+                var someFunc = FindBestErrorOverload(overloads, argTypes, carg, _txb.Features.PowerFxV1CompatibilityRules);
 
                 // If nothing matches even the arity, we're done.
                 if (someFunc == null)
@@ -5177,7 +5185,7 @@ namespace Microsoft.PowerFx.Core.Binding
                             dataSourceBoundType.ReportNonExistingName(FieldNameKind.Display, _txb.ErrorContainer, fieldName, node.Children[i]);
                             nodeType = DType.Error;
                         }
-                        else if (!fieldType.Accepts(_txb.GetType(node.Children[i])))
+                        else if (!fieldType.Accepts(_txb.GetType(node.Children[i]), exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: _txb.Features.PowerFxV1CompatibilityRules))
                         {
                             _txb.ErrorContainer.EnsureError(
                                 DocumentErrorSeverity.Severe,
@@ -5233,17 +5241,19 @@ namespace Microsoft.PowerFx.Core.Binding
                     var childType = _txb.GetType(child);
                     isSelfContainedConstant &= _txb.IsSelfContainedConstant(child);
 
-                    var isChildTypeAllowedInTable = !childType.IsDeferred && !childType.IsVoid;
+                    var usePFxV1CompatRules = _features.PowerFxV1CompatibilityRules;
 
+                    // Deferred and void types are not allowed in tables.
+                    var isChildTypeAllowedInTable = !childType.IsDeferred && !childType.IsVoid;
                     if (!isChildTypeAllowedInTable)
                     {
                         _txb.ErrorContainer.EnsureError(DocumentErrorSeverity.Severe, child, TexlStrings.ErrTableDoesNotAcceptThisType);
                         continue;
                     }
 
-                    if (_txb.Features.PowerFxV1CompatibilityRules)
-                    {                        
-                        if (DType.TryUnionWithCoerce(exprType, childType, out var returnType, out var needCoercion))
+                    if (usePFxV1CompatRules)
+                    {
+                        if (DType.TryUnionWithCoerce(exprType, childType, usePowerFxV1CompatibilityRules: true, out var returnType, out var needCoercion))
                         {
                             exprType = returnType;
                             if (needCoercion)
@@ -5258,15 +5268,16 @@ namespace Microsoft.PowerFx.Core.Binding
                     }
                     else
                     {
+                        // legacy logic, not using PFx V1 compat rules
                         if (!exprType.IsValid)
                         {
                             exprType = childType;
                         }
-                        else if (exprType.CanUnionWith(childType))
+                        else if (exprType.CanUnionWith(childType, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: false))
                         {
-                            exprType = DType.Union(exprType, childType);
+                            exprType = DType.Union(exprType, childType, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: false);
                         }
-                        else if (childType.CoercesTo(exprType))
+                        else if (childType.CoercesTo(exprType, aggregateCoercion: true, isTopLevelCoercion: false, usePowerFxV1CompatibilityRules: false))
                         {
                             _txb.SetCoercedType(child, exprType);
                         }
